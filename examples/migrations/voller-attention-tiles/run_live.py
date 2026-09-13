@@ -1,4 +1,4 @@
-"""Run the pending real-service migration after configuring Memanto normally.
+"""Run the real-service migration after configuring Memanto normally.
 
 This command uploads the public-source selection to two fresh demo agents.
 It never deletes the source or claims success from a dry run.
@@ -186,7 +186,7 @@ def collect_agent_evidence(
 
 
 def retrieval_scores(probes: list[dict[str, Any]]) -> dict[str, int]:
-    """Keep the original strict criterion, including the immediate measurements."""
+    """Require every recorded scoring stage to pass; never replace older scores."""
     return {
         field: sum(p["expected_id"] in p[field] for p in probes)
         for field in (
@@ -195,8 +195,120 @@ def retrieval_scores(probes: list[dict[str, Any]]) -> dict[str, int]:
             "second_memanto_top5",
             "first_after_verified_export_top5",
             "second_after_verified_export_top5",
+            "first_after_readiness_top5",
+            "second_after_readiness_top5",
         )
+        if probes and field in probes[0]
     }
+
+
+def wait_for_complete_export(
+    command: Callable[..., None],
+    label: str,
+    agent: str,
+    destination: Path,
+    data: dict,
+    *,
+    max_attempts: int = 8,
+    timeout_seconds: float = 90,
+    interval_seconds: float = 2,
+) -> dict[str, Any]:
+    """Require two successive complete exports without using scored questions.
+
+    This is an application-level visibility barrier, not a backend readiness
+    promise. Semantic recall still has to pass independently after this gate.
+    The time budget is checked between CLI calls; each CLI call also times out.
+    """
+    if max_attempts < 2 or timeout_seconds <= 0 or interval_seconds <= 0:
+        raise ValueError("Readiness requires at least two attempts and positive limits")
+    started = time.monotonic()
+    expected = digest(data)
+    snapshots = destination.parent / f"{destination.name}_readiness"
+    snapshots.mkdir(parents=True, exist_ok=False)
+    observations: list[dict[str, Any]] = []
+    evidence: dict[str, Any] = {
+        "criterion": "two successive native exports exactly reconstruct the entire source",
+        "expected_source_sha256": expected,
+        "max_attempts": max_attempts,
+        "timeout_seconds": timeout_seconds,
+        "interval_seconds": interval_seconds,
+        "ready": False,
+        "observations": observations,
+        "limitation": "Complete export visibility does not guarantee semantic retrieval quality",
+    }
+    evidence_path = snapshots / "readiness.json"
+
+    def save() -> None:
+        evidence_path.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+
+    save()
+    consecutive = 0
+    for attempt in range(1, max_attempts + 1):
+        if time.monotonic() - started >= timeout_seconds:
+            break
+        snapshot = snapshots / f"attempt-{attempt:02d}"
+        # CLI/authentication failures propagate immediately; they are not readiness misses.
+        export_and_copy(command, f"{label}_ready_{attempt:02d}", agent, snapshot)
+        observation: dict[str, Any] = {"attempt": attempt, "complete": False}
+        try:
+            actual = digest(restore_bundle(snapshot))
+            observation["source_sha256"] = actual
+            observation["complete"] = actual == expected
+        except ValueError as exc:
+            observation["validation_error"] = str(exc)
+        elapsed = time.monotonic() - started
+        observation["elapsed_seconds"] = round(elapsed, 3)
+        observations.append(observation)
+        consecutive = consecutive + 1 if observation["complete"] else 0
+        save()
+        print("Readiness observation: " + json.dumps(observation), flush=True)
+        if elapsed >= timeout_seconds:
+            break
+        if consecutive >= 2:
+            shutil.copytree(snapshot, destination, symlinks=True)
+            evidence["ready"] = True
+            evidence["elapsed_seconds"] = round(elapsed, 3)
+            save()
+            return evidence
+        if attempt < max_attempts:
+            time.sleep(min(interval_seconds, timeout_seconds - elapsed))
+    evidence["failure"] = (
+        "Complete source visibility was not confirmed within the limits"
+    )
+    save()
+    raise TimeoutError(evidence["failure"])
+
+
+def collect_ready_agent_evidence(
+    command: Callable[..., None],
+    label: str,
+    agent: str,
+    destination: Path,
+    data: dict,
+    probes: list[dict[str, Any]],
+    stage: str,
+) -> dict[str, Any]:
+    readiness = wait_for_complete_export(command, label, agent, destination, data)
+    field = f"{stage}_after_readiness_top5"
+    for probe in probes:
+        probe[field] = remote_recall(agent, probe["query"])
+        print(
+            "Recall observation: "
+            + json.dumps(
+                {
+                    "field": field,
+                    "query": probe["query"],
+                    "expected_id": probe["expected_id"],
+                    "returned_ids": probe[field],
+                }
+            ),
+            flush=True,
+        )
+    (destination.parent / f"{stage}_recall.json").write_text(
+        json.dumps({"probes": probes, "readiness": readiness}, indent=2),
+        encoding="utf-8",
+    )
+    return readiness
 
 
 def main() -> int:
@@ -206,6 +318,11 @@ def main() -> int:
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--upload-public-source", action="store_true")
+    parser.add_argument(
+        "--diagnose-immediate",
+        action="store_true",
+        help="Reproduce v2 immediate/post-export measurements; early misses still fail",
+    )
     args = parser.parse_args()
     if not args.upload_public_source:
         parser.error(
@@ -240,14 +357,19 @@ def main() -> int:
     command("01_create_first", "agent", "create", first)
     command("02_preview", "migrate", "okf", str(output / "source_okf"), "--dry-run")
     command("03_import", "migrate", "okf", str(output / "source_okf"), "--agent", first)
-    collect_agent_evidence(
+    collect = (
+        collect_agent_evidence
+        if args.diagnose_immediate
+        else collect_ready_agent_evidence
+    )
+    readiness_first = collect(
         command, "04_export", first, output / "first_export", data, baseline, "first"
     )
     command("05_create_second", "agent", "create", second)
     command(
         "06_reimport", "migrate", "okf", str(output / "first_export"), "--agent", second
     )
-    collect_agent_evidence(
+    readiness_second = collect(
         command,
         "07_export_again",
         second,
@@ -262,7 +384,12 @@ def main() -> int:
         "selected_tiles": len(data["tiles"]),
         "data_round_trip_passed": True,
         "retrieval_hits_out_of_8": scores,
-        "measurement_protocol": "v2: immediate recall, complete export verification, then one additional pass of the same queries for each agent; no query retries",
+        "measurement_protocol": (
+            "v2: immediate recall, complete export verification, then one additional pass; early misses still fail"
+            if args.diagnose_immediate
+            else "v3: two successive complete native exports before one scored pass per agent; no scored-query retries"
+        ),
+        "readiness": {"first": readiness_first, "second": readiness_second},
         "probes": baseline,
         "probe_limit": "Eight named-record retrieval probes; not a general answer-quality or reasoning benchmark",
         "competition_entry_complete": False,

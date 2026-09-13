@@ -1,5 +1,6 @@
 """Offline regressions for the live runner; no service credentials are used."""
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -7,7 +8,14 @@ import pytest
 import run_live
 from adapter import build_bundle, restore_bundle
 from fastapi import HTTPException
-from run_live import collect_agent_evidence, export_and_copy, retrieval_scores, run_cli
+from run_live import (
+    collect_agent_evidence,
+    collect_ready_agent_evidence,
+    export_and_copy,
+    retrieval_scores,
+    run_cli,
+    wait_for_complete_export,
+)
 from test_adapter import catalog
 
 from memanto.app.services.okf_export_service import OkfExportService
@@ -142,3 +150,113 @@ def test_later_recall_success_does_not_erase_original_failure():
     assert scores["first_memanto_top5"] == 6
     assert scores["first_after_verified_export_top5"] == 8
     assert not all(value == 8 for value in scores.values())
+
+
+def test_ready_queries_wait_for_two_consecutive_complete_snapshots(
+    tmp_path, monkeypatch
+):
+    data = catalog()
+    complete = iter([False, True, False, True, True])
+    calls = []
+    monkeypatch.setattr(run_live.time, "sleep", lambda seconds: None)
+
+    def export(command, label, agent, destination):
+        calls.append("export")
+        snapshot = dict(data)
+        if not next(complete):
+            snapshot["tiles"] = data["tiles"][1:]
+        build_bundle(snapshot, destination)
+
+    def recall(agent, query):
+        # Readiness never asks the scored question; scoring happens just once.
+        assert calls == ["export"] * 5
+        calls.append("recall")
+        return []
+
+    monkeypatch.setattr(run_live, "export_and_copy", export)
+    monkeypatch.setattr(run_live, "remote_recall", recall)
+    probes = [{"query": "Scored question", "expected_id": data["tiles"][0]["id"]}]
+    evidence = collect_ready_agent_evidence(
+        lambda *args: None, "04", "agent", tmp_path / "export", data, probes, "first"
+    )
+    assert calls == ["export"] * 5 + ["recall"]
+    assert evidence["ready"]
+    assert len(evidence["observations"]) == 5
+    assert restore_bundle(tmp_path / "export") == data
+    # A semantic miss after the barrier still fails; it isn't retried until green.
+    assert retrieval_scores(probes)["first_after_readiness_top5"] == 0
+
+
+def test_incomplete_visibility_is_bounded_and_evidence_survives(tmp_path, monkeypatch):
+    data = catalog()
+    calls = []
+    monkeypatch.setattr(run_live.time, "sleep", lambda seconds: None)
+
+    def export(command, label, agent, destination):
+        calls.append(label)
+        build_bundle(dict(data, tiles=data["tiles"][1:]), destination)
+
+    monkeypatch.setattr(run_live, "export_and_copy", export)
+    with pytest.raises(TimeoutError, match="not confirmed"):
+        wait_for_complete_export(
+            lambda *args: None,
+            "04",
+            "agent",
+            tmp_path / "export",
+            data,
+            max_attempts=3,
+        )
+    assert len(calls) == 3
+    assert not (tmp_path / "export").exists()
+    evidence = json.loads((tmp_path / "export_readiness/readiness.json").read_text())
+    assert evidence["ready"] is False
+    assert len(evidence["observations"]) == 3
+
+
+def test_readiness_deadline_cannot_be_overridden_by_complete_data(
+    tmp_path, monkeypatch
+):
+    data = catalog()
+    clock = [0.0]
+    monkeypatch.setattr(run_live.time, "monotonic", lambda: clock[0])
+
+    def export(command, label, agent, destination):
+        build_bundle(data, destination)
+        clock[0] += 10
+
+    monkeypatch.setattr(run_live, "export_and_copy", export)
+    with pytest.raises(TimeoutError):
+        wait_for_complete_export(
+            lambda *args: None,
+            "04",
+            "agent",
+            tmp_path / "export",
+            data,
+            timeout_seconds=5,
+        )
+    assert not (tmp_path / "export").exists()
+
+
+def test_readiness_does_not_retry_cli_errors_or_score_after_them(tmp_path, monkeypatch):
+    calls = []
+
+    def export(*args):
+        calls.append("export")
+        raise RuntimeError("Authentication failure")
+
+    def recall(*args):
+        pytest.fail("Scoring must not run after a failed readiness check")
+
+    monkeypatch.setattr(run_live, "export_and_copy", export)
+    monkeypatch.setattr(run_live, "remote_recall", recall)
+    with pytest.raises(RuntimeError, match="Authentication"):
+        collect_ready_agent_evidence(
+            lambda *args: None,
+            "04",
+            "agent",
+            tmp_path / "export",
+            catalog(),
+            [{"query": "question", "expected_id": "target"}],
+            "first",
+        )
+    assert calls == ["export"]
