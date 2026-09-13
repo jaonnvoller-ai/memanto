@@ -27,7 +27,7 @@ jobs:
       - name: Check out the reviewed entry
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: 2ee711856511b8004476e5e5641baeacc5f710d4
+          ref: 5d13f71895870a022da017fbbb0eeca9725205b9
           persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -76,7 +76,7 @@ jobs:
       - name: Check out the reviewed entry
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: 2ee711856511b8004476e5e5641baeacc5f710d4
+          ref: 5d13f71895870a022da017fbbb0eeca9725205b9
           persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
