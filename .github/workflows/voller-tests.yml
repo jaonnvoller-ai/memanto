@@ -1,0 +1,124 @@
+name: Voller portable memory tests
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/voller-tests.yml]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Choose local checks or a real Moorcheh migration
+        required: true
+        default: local
+        type: choice
+        options: [local, live]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voller-portable-memory
+  cancel-in-progress: false
+
+jobs:
+  local:
+    name: Local checks and portable sample
+    if: github.repository == 'jaonnvoller-ai/memanto'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the reviewed entry
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 4adeb0ce94502ea8d122ecaade9e1e42f738333a
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install the pinned entry dependencies
+        run: python -m pip install -r examples/migrations/voller-attention-tiles/requirements.txt
+      - name: Run the adapter and upstream format tests
+        run: >-
+          python -m pytest -o addopts='' -q
+          examples/migrations/voller-attention-tiles/test_adapter.py
+          tests/test_okf.py tests/test_migrate.py
+      - name: Run the local portability demonstration
+        working-directory: examples/migrations/voller-attention-tiles
+        run: python run_demo.py source_public.json local-demo
+      - name: Record the local result
+        run: |
+          echo 'Local tests and native-format reconstruction passed. No live service was used in this job.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Save local evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: voller-local-${{ github.run_id }}-${{ github.run_attempt }}
+          path: examples/migrations/voller-attention-tiles/local-demo/
+          retention-days: 30
+          if-no-files-found: error
+
+  live:
+    name: Real Moorcheh migration and recall
+    if: github.repository == 'jaonnvoller-ai/memanto' && github.event_name == 'workflow_dispatch' && inputs.mode == 'live'
+    needs: local
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check that the service key has been configured
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: |
+          if [ -z "${MOORCHEH_API_KEY:-}" ]; then
+            echo '::error::Add the MOORCHEH_API_KEY repository secret once, then run this workflow in live mode.'
+            exit 1
+          fi
+      - name: Check out the reviewed entry
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 4adeb0ce94502ea8d122ecaade9e1e42f738333a
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install the pinned entry dependencies
+        run: python -m pip install -r examples/migrations/voller-attention-tiles/requirements.txt
+      - name: Run the real service migration
+        working-directory: examples/migrations/voller-attention-tiles
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: python run_live.py source_public.json live-demo --upload-public-source
+      - name: Check evidence before saving it
+        id: evidence_check
+        if: always()
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          key = os.environ.get('MOORCHEH_API_KEY', '').encode()
+          folder = Path('examples/migrations/voller-attention-tiles/live-demo')
+          for path in folder.rglob('*'):
+              if path.is_symlink():
+                  raise SystemExit('Refusing to publish linked evidence.')
+              if path.is_file() and key and key in path.read_bytes():
+                  raise SystemExit('Refusing to publish evidence containing the service key.')
+          PY
+      - name: Save live evidence
+        if: always() && steps.evidence_check.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: voller-live-${{ github.run_id }}-${{ github.run_attempt }}
+          path: examples/migrations/voller-attention-tiles/live-demo/
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Record the live result
+        run: |
+          echo 'The real-service round trip and all eight named-record retrieval probes passed. Review the evidence artifact. A demo video, public showcase and bounty claim are still required.' >> "$GITHUB_STEP_SUMMARY"
