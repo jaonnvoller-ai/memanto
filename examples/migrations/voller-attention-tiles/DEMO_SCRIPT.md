@@ -2,6 +2,8 @@
 
 Status: recording outline, not a recorded demonstration or submitted entry.
 
+Technical validation is complete: [run 34788286157](https://github.com/jaonnvoller-ai/memanto/actions/runs/34788286157) passed the v3 protocol with full data preserved and 8/8 named-record retrieval on both agents. No additional workflow run is needed to establish that result. A new recording must show an actual run, and creating its two new agents requires available account capacity; the approved cleanup only covered the two older copies already removed.
+
 ## Record the actual pipeline
 
 Use a screen recorder on the computer running Memanto. Configure the service key privately before recording; never show the key, configuration file or secret settings. Keep the original recording if editing it into a shorter cut. Do not stage memory loss by deleting the real source.
@@ -31,7 +33,7 @@ A phone recording of downloading an artifact is not the live terminal demonstrat
 | Genuine source and complete-data round trip | Included; custom-source eligibility needs maintainer review |
 | Actual exported OKF sample and raw summary | Included |
 | Measured recall | Included, with all early misses disclosed |
-| New v3 readiness service run | Pending |
+| New v3 readiness service run | Passed: run 34788286157, 8/8 on both agents, full source preserved |
 | Real end-to-end recording URL | Pending |
 | Public showcase URL with required Moorcheh tag | Pending |
 | Upstream contribution PR URL | Pending; connected app previously returned HTTP 403 |
@@ -46,6 +48,6 @@ Use the same GitHub identity, `jaonnvoller-ai`, for the contribution and the Bou
 
 Publish only with the real recording attached and the actual result visible:
 
-> I am building a portable home for my Attention Tiles with Memanto and OKF. The adapter preserved all 66 public catalogue records through two real service migrations, including original links and evidence limitations. Earlier tests exposed immediate retrieval misses; all eight named-record probes passed on both agents after full export verification. The code, exported Markdown and limitations are available for inspection. This is a retrieval and data-portability demonstration. @moorcheh_ai
+> I am building a portable home for my Attention Tiles with Memanto and OKF. The adapter preserved all 66 public catalogue records through real service import, export and reimport, including original links and evidence limitations. Earlier tests exposed immediate retrieval misses. The revised version checks complete export visibility before one scored pass: all eight named-record probes passed on each agent in run 34788286157. The code, exported Markdown and limitations are available for inspection. This is a retrieval and data-portability demonstration. @moorcheh_ai
 
-For YouTube, include https://www.youtube.com/@moorchehai in the description. For LinkedIn, tag the official Moorcheh AI company page. Do not claim a new v3 cloud pass until that run has actually completed.
+For YouTube, include https://www.youtube.com/@moorchehai in the description. For LinkedIn, tag the official Moorcheh AI company page. Keep the recorded result distinct from any earlier run cited for context.

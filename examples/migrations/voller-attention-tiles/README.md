@@ -4,7 +4,7 @@ Prepared for Jaon Voller with OpenAI Codex assistance, 13 September 2026.
 
 An invention catalogue can lose the distinction between a proposal and a tested result when only its summary moves into a new memory system. This adapter carries each whole Attention Tile, including unknown fields, evidence limitations, original links, dates, visibility and parent relationships, into Memanto's OKF format. A reverse operation restores the source records and their order.
 
-**Completed:** source adapter, official CLI dry-run, two real Moorcheh round trips preserving all source records, actual cloud-export sample and contributor onboarding. The diagnostic run retrieved all eight expected records on both agents after complete export verification, while earlier immediate queries missed records. The new readiness protocol has passed local tests and awaits its first live run. Video, public showcase, upstream PR and bounty claim remain outstanding.
+**Completed:** source adapter, official CLI dry-run, real Moorcheh round trips preserving all source records, actual cloud-export sample, contributor onboarding and a successful v3 live readiness run. [Run 34788286157](https://github.com/jaonnvoller-ai/memanto/actions/runs/34788286157) passed: both agents retrieved all eight expected records after the independent readiness gate, with all 16 expected records ranked first. Earlier immediate-query failures remain disclosed below. Video, public showcase, upstream PR and bounty claim remain outstanding.
 
 ## Real source
 
@@ -62,7 +62,7 @@ The runner uses the shipped import/export CLI, exports in Memanto's approved dir
 
 The scored questions are not used to decide readiness. Each is asked exactly once per agent after the gate; any missing expected record still fails. Full export visibility is an application-level gate, not a guarantee of semantic retrieval quality. Local regression tests cover incomplete exports, reset of consecutive matches, time/attempt limits, immediate command failure and a scored miss that is not retried.
 
-To reproduce the older diagnostic protocol explicitly, add `--diagnose-immediate`. It retains immediate scores and one later pass; early misses still fail. Historical failed runs remain failed. The v3 readiness runner has not yet completed a live service run.
+To reproduce the older diagnostic protocol explicitly, add `--diagnose-immediate`. It retains immediate scores and one later pass; early misses still fail. Historical failed runs remain failed. The v3 readiness runner completed its first successful live service run on 13 September 2026.
 
 ### Observed live results
 
@@ -73,10 +73,15 @@ Both imports in the verified earlier archive report **67 imported, 0 failed, 0 s
 | 34781697137, immediate retrieval | 6 / 8 | 8 / 8 | Both exports |
 | 34784846111, immediate retrieval | 7 / 8 | 5 / 8 | Both exports |
 | 34784846111, after verified export | 8 / 8 | 8 / 8 | Both exports |
+| 34788286157, v3 after two consecutive complete exports | 8 / 8 | 8 / 8 | Both exports |
 
 [Diagnostic run 34784846111](https://github.com/jaonnvoller-ai/memanto/actions/runs/34784846111) exited 1 under its strict rule requiring every stage to pass. All 16 later probes ranked their expected record first. The [32 recorded observations](evidence/live_34784846111.json) were independently parsed from its completed job log. Queries changed from misses to hits on the same agent without application-level rewriting or reimport, supporting a transient readiness explanation; they do not establish a universal delay or backend root cause.
 
-The latest full local suite after the readiness change passed **990 tests**, with **24 skipped** service tests and one existing dependency deprecation warning. All pre-commit hooks and scoped mypy checks passed. These local checks do not establish a new cloud pass.
+[Successful run 34788286157](https://github.com/jaonnvoller-ai/memanto/actions/runs/34788286157) used runner commit `9a821ca9b08673b570a63de7c23524600516a3e5`. The first agent's two exports were complete; the second agent's first export was incomplete, followed by two complete exports. The retained readiness observations reached the gate at 13.069 and 19.064 seconds respectively. These are observations from this run, not promised waiting times. All 16 scored queries were asked once and ranked the expected record first. The [structured evidence](evidence/live_34788286157.json) includes every readiness and recall observation parsed independently from the completed job log, with recomputed scores and artifact references. Both full reconstructed source digests matched. The live artifact's ZIP digest is GitHub-reported; its bytes were not independently fetched into the review workspace.
+
+The first v3 attempt, [34787075127](https://github.com/jaonnvoller-ai/memanto/actions/runs/34787075127), stopped before import because the five-namespace account limit was reached. Before the successful run, the owner approved deleting exactly the two old disposable agents from run 34781697137. The automation verified each current set of 67 documents against the archived native document hashes, uploaded fresh backups, rechecked both snapshots and removed only that approved pair. It confirmed two free slots before creating the new agents. The earlier saved export sample remains available. This cleanup was separate from the adapter and is not a general deletion policy; the live runner still creates two fresh agents on each invocation.
+
+The latest full local suite after the readiness change passed **990 tests**, with **24 skipped** service tests and one existing dependency deprecation warning. All pre-commit hooks and scoped mypy checks passed. The successful manual run also passed **49 focused tests**, including nine cleanup checks, in its separate local job.
 
 The official OKF command does not produce a provider savings report or accept `--report`. Do not invent one. Record actual measurements separately and retain the import summaries and limits.
 
