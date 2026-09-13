@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -131,6 +132,73 @@ def remote_recall(agent: str, query: str) -> list[str]:
     return ids
 
 
+def collect_agent_evidence(
+    command: Callable[..., None],
+    label: str,
+    agent: str,
+    destination: Path,
+    data: dict,
+    probes: list[dict[str, Any]],
+    stage: str,
+) -> None:
+    """Keep immediate results and make one fixed post-export measurement.
+
+    Full-data verification is independent of the expected probe answers. This
+    does not poll until a query passes or replace an earlier unsuccessful result.
+    Export visibility alone does not guarantee semantic retrieval readiness.
+    """
+    started = time.monotonic()
+
+    def measure(field: str) -> None:
+        for probe in probes:
+            probe[field] = remote_recall(agent, probe["query"])
+            print(
+                "Recall observation: "
+                + json.dumps(
+                    {
+                        "field": field,
+                        "query": probe["query"],
+                        "expected_id": probe["expected_id"],
+                        "returned_ids": probe[field],
+                        "elapsed_seconds": round(time.monotonic() - started, 3),
+                    }
+                ),
+                flush=True,
+            )
+
+    measure(f"{stage}_memanto_top5")
+    checkpoint = destination.parent / f"{stage}_recall.json"
+    checkpoint.write_text(
+        json.dumps({"probes": probes, "data_round_trip_complete": False}, indent=2),
+        encoding="utf-8",
+    )
+    export_and_copy(command, label, agent, destination)
+    if digest(restore_bundle(destination)) != digest(data):
+        raise AssertionError(
+            f"{stage} real-service export did not preserve all selected fields"
+        )
+    print(f"Verified complete source data for {stage} agent", flush=True)
+    measure(f"{stage}_after_verified_export_top5")
+    checkpoint.write_text(
+        json.dumps({"probes": probes, "agent_export_verified": True}, indent=2),
+        encoding="utf-8",
+    )
+
+
+def retrieval_scores(probes: list[dict[str, Any]]) -> dict[str, int]:
+    """Keep the original strict criterion, including the immediate measurements."""
+    return {
+        field: sum(p["expected_id"] in p[field] for p in probes)
+        for field in (
+            "source_top5",
+            "first_memanto_top5",
+            "second_memanto_top5",
+            "first_after_verified_export_top5",
+            "second_after_verified_export_top5",
+        )
+    }
+
+
 def main() -> int:
     from memanto.cli.config.manager import ConfigManager
 
@@ -172,37 +240,29 @@ def main() -> int:
     command("01_create_first", "agent", "create", first)
     command("02_preview", "migrate", "okf", str(output / "source_okf"), "--dry-run")
     command("03_import", "migrate", "okf", str(output / "source_okf"), "--agent", first)
-    for probe in baseline:
-        probe["first_memanto_top5"] = remote_recall(first, probe["query"])
-    (output / "first_recall.json").write_text(
-        json.dumps({"probes": baseline, "data_round_trip_complete": False}, indent=2),
-        encoding="utf-8",
+    collect_agent_evidence(
+        command, "04_export", first, output / "first_export", data, baseline, "first"
     )
-    export_and_copy(command, "04_export", first, output / "first_export")
-    if digest(restore_bundle(output / "first_export")) != digest(data):
-        raise AssertionError(
-            "First real-service export did not preserve all selected fields"
-        )
     command("05_create_second", "agent", "create", second)
     command(
         "06_reimport", "migrate", "okf", str(output / "first_export"), "--agent", second
     )
-    for probe in baseline:
-        probe["second_memanto_top5"] = remote_recall(second, probe["query"])
-    export_and_copy(command, "07_export_again", second, output / "second_export")
-    if digest(restore_bundle(output / "second_export")) != digest(data):
-        raise AssertionError(
-            "Second real-service export did not preserve all selected fields"
-        )
-    scores = {
-        field: sum(p["expected_id"] in p[field] for p in baseline)
-        for field in ("source_top5", "first_memanto_top5", "second_memanto_top5")
-    }
+    collect_agent_evidence(
+        command,
+        "07_export_again",
+        second,
+        output / "second_export",
+        data,
+        baseline,
+        "second",
+    )
+    scores = retrieval_scores(baseline)
     report = {
         "agents_created": [first, second],
         "selected_tiles": len(data["tiles"]),
         "data_round_trip_passed": True,
         "retrieval_hits_out_of_8": scores,
+        "measurement_protocol": "v2: immediate recall, complete export verification, then one additional pass of the same queries for each agent; no query retries",
         "probes": baseline,
         "probe_limit": "Eight named-record retrieval probes; not a general answer-quality or reasoning benchmark",
         "competition_entry_complete": False,

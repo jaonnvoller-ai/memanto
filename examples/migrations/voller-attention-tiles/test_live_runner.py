@@ -4,9 +4,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import run_live
 from adapter import build_bundle, restore_bundle
 from fastapi import HTTPException
-from run_live import export_and_copy, run_cli
+from run_live import collect_agent_evidence, export_and_copy, retrieval_scores, run_cli
 from test_adapter import catalog
 
 from memanto.app.services.okf_export_service import OkfExportService
@@ -75,3 +76,69 @@ def test_failed_command_is_visible_without_exposing_key(tmp_path, monkeypatch, c
     assert sentinel not in captured.err + saved
     assert "[REDACTED]" in captured.err and "[REDACTED]" in saved
     assert "[04_export] ::error::export destination rejected" in captured.err
+
+
+@pytest.mark.parametrize("complete_export", [True, False])
+def test_recall_diagnostics_preserve_misses_and_require_complete_export(
+    tmp_path, monkeypatch, capsys, complete_export
+):
+    data = catalog()
+    target = data["tiles"][0]["id"]
+    probes = [{"query": "Synthetic named-record question", "expected_id": target}]
+    calls = []
+
+    def recall(agent, query):
+        calls.append("recall")
+        return [] if len(calls) == 1 else [target]
+
+    def export(command, label, agent, destination):
+        calls.append("export")
+        exported = dict(data)
+        if not complete_export:
+            exported["tiles"] = data["tiles"][1:]
+        build_bundle(exported, destination)
+
+    monkeypatch.setattr(run_live, "remote_recall", recall)
+    monkeypatch.setattr(run_live, "export_and_copy", export)
+
+    def collect():
+        collect_agent_evidence(
+            lambda *args: None,
+            "04_export",
+            "test-agent",
+            tmp_path / "export",
+            data,
+            probes,
+            "first",
+        )
+
+    if complete_export:
+        collect()
+        assert calls == ["recall", "export", "recall"]
+        assert probes[0]["first_after_verified_export_top5"] == [target]
+    else:
+        with pytest.raises(AssertionError, match="did not preserve"):
+            collect()
+        assert calls == ["recall", "export"]
+        assert "first_after_verified_export_top5" not in probes[0]
+    assert probes[0]["first_memanto_top5"] == []
+    assert (tmp_path / "first_recall.json").exists()
+    assert '"returned_ids": []' in capsys.readouterr().out
+
+
+def test_later_recall_success_does_not_erase_original_failure():
+    probes = [
+        {
+            "expected_id": f"tile-{i}",
+            "source_top5": [f"tile-{i}"],
+            "first_memanto_top5": [] if i < 2 else [f"tile-{i}"],
+            "second_memanto_top5": [f"tile-{i}"],
+            "first_after_verified_export_top5": [f"tile-{i}"],
+            "second_after_verified_export_top5": [f"tile-{i}"],
+        }
+        for i in range(8)
+    ]
+    scores = retrieval_scores(probes)
+    assert scores["first_memanto_top5"] == 6
+    assert scores["first_after_verified_export_top5"] == 8
+    assert not all(value == 8 for value in scores.values())
