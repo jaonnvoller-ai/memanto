@@ -67,6 +67,7 @@ def verify_records(
 ) -> None:
     from adapter import digest as source_digest
     from adapter import restore_contents
+
     from memanto.app.services.memory_read_service import MemoryReadService
     from memanto.app.services.okf_export_service import OkfExportService
 
