@@ -4,14 +4,8 @@ on:
   push:
     branches: [main]
     paths: [.github/workflows/voller-tests.yml]
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Choose local checks or a real Moorcheh migration
-        required: true
-        default: local
-        type: choice
-        options: [local, live]
+  # Every fresh manual run includes the live test after local checks pass.
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -62,7 +56,7 @@ jobs:
 
   live:
     name: Real Moorcheh migration and recall
-    if: github.repository == 'jaonnvoller-ai/memanto' && github.event_name == 'workflow_dispatch' && inputs.mode == 'live'
+    if: github.repository == 'jaonnvoller-ai/memanto' && github.event_name == 'workflow_dispatch'
     needs: local
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -75,7 +69,7 @@ jobs:
           MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
         run: |
           if [ -z "${MOORCHEH_API_KEY:-}" ]; then
-            echo '::error::Add the MOORCHEH_API_KEY repository secret once, then run this workflow in live mode.'
+            echo '::error::Add the MOORCHEH_API_KEY repository secret once, then start a new manual run.'
             exit 1
           fi
       - name: Check out the reviewed entry
