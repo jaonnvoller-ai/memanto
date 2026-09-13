@@ -29,6 +29,12 @@ jobs:
         with:
           ref: 9a821ca9b08673b570a63de7c23524600516a3e5
           persist-credentials: false
+      - name: Check out this run's approved cleanup automation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: _automation
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
@@ -41,6 +47,7 @@ jobs:
           examples/migrations/voller-attention-tiles/test_adapter.py
           examples/migrations/voller-attention-tiles/test_live_runner.py
           tests/test_okf.py tests/test_migrate.py
+          _automation/scripts/test_voller_cleanup.py
       - name: Run the local portability demonstration
         working-directory: examples/migrations/voller-attention-tiles
         run: python run_demo.py source_public.json local-demo
@@ -78,12 +85,66 @@ jobs:
         with:
           ref: 9a821ca9b08673b570a63de7c23524600516a3e5
           persist-credentials: false
+      - name: Check out this run's approved cleanup automation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: _automation
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Install the pinned entry dependencies
         run: python -m pip install -r examples/migrations/voller-attention-tiles/requirements.txt
+      - name: Verify and back up the two approved old cloud copies
+        id: cleanup_prepare
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: >-
+          python _automation/scripts/voller_cleanup.py prepare
+          --entry examples/migrations/voller-attention-tiles
+          --output _automation/cleanup-backup
+      - name: Check the fresh cleanup backup before saving
+        id: cleanup_scan
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          key = os.environ['MOORCHEH_API_KEY'].encode()
+          for path in Path('_automation/cleanup-backup').rglob('*'):
+              if path.is_symlink():
+                  raise SystemExit('Refusing a linked backup.')
+              if path.is_file() and key in path.read_bytes():
+                  raise SystemExit('Refusing a backup containing the service key.')
+          PY
+      - name: Save verified backup before any cloud deletion
+        id: cleanup_backup
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: voller-approved-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: _automation/cleanup-backup/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Remove only the approved pair and confirm free space
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+          VOLLER_BACKUP_ARTIFACT_ID: ${{ steps.cleanup_backup.outputs.artifact-id }}
+        run: >-
+          python _automation/scripts/voller_cleanup.py purge
+          --entry examples/migrations/voller-attention-tiles
+          --output _automation/cleanup-backup
+          --backup-artifact-id "$VOLLER_BACKUP_ARTIFACT_ID"
+      - name: Save the cleanup outcome
+        if: always() && steps.cleanup_backup.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: voller-cleanup-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: _automation/cleanup-backup/cleanup_result.json
+          retention-days: 30
+          if-no-files-found: ignore
       - name: Run the real service migration
         working-directory: examples/migrations/voller-attention-tiles
         env:

@@ -2,6 +2,21 @@
 
 This repository has a reusable workflow for the reviewed Attention Tiles entry. A new manual run includes the local checks and the real Moorcheh migration. There is no mode selector.
 
+## Approved one-off cleanup
+
+The Community account reached its five-namespace limit in run 34787075127, before the first agent could be created. Jaon explicitly approved removing the two older backed-up test namespaces on 13 September 2026:
+
+- `memanto_agent_voller-portable-054a48145260-a`
+- `memanto_agent_voller-portable-054a48145260-b`
+
+A fresh manual run now performs this exact cleanup before the live migration. It compares all 67 memory IDs and every native OKF memory document against hashes from the verified archive of run 34781697137, reconstructs all 66 original public tiles, saves fresh raw snapshots, and uploads that backup successfully before any deletion. It then rechecks both namespaces, removes only the approved pair, and checks for two free slots. Unexpected records, changed data, incomplete pages, failed backups or delayed quota release stop the live test.
+
+The nine cleanup safety tests use local fixtures and no service credential. Together with the existing focused tests, 49 checks passed before publication; Ruff and mypy also passed. No cloud deletion was performed during these tests. Current cloud contents and freed capacity are verified only when the new manual workflow executes.
+
+This permission applies only to those two exact old test namespaces. The original saved archive and the public OKF sample remain available. Namespace removal is permanent in Moorcheh; the original archive retains the earlier exported data, while the fresh backup artifact retains the raw records observed immediately before deletion. Both backup and cleanup-result artifacts are retained for 30 days. Stop other writes to these disposable agents while cleanup runs; Moorcheh does not provide an atomic compare-and-delete operation here.
+
+If the pair is already absent, cleanup makes no deletion request. It still requires two free slots before starting another two-agent test. It never deletes newer demo agents automatically or buys more capacity.
+
 ## Start the full test
 
 Open [Voller portable memory tests](https://github.com/jaonnvoller-ai/memanto/actions/workflows/voller-tests.yml), refresh the page, choose **Run workflow**, leave branch **main** selected and press the green **Run workflow** button.
