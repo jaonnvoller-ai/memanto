@@ -9,9 +9,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,49 @@ PROBES = [
     ("What is the Ocean Bubbles proposal?", "ocean-bubbles"),
     ("What is Super Punch intended for?", "super-punch"),
 ]
+
+
+def run_cli(output: Path, label: str, *parts: str, key: str | None = None) -> None:
+    """Save CLI output and expose redacted failures in the workflow log."""
+    proc = subprocess.run(
+        [sys.executable, "-m", "memanto.cli.main", *parts],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    transcript = proc.stdout + proc.stderr
+    if key:
+        transcript = transcript.replace(key, "[REDACTED]")
+    (output / f"{label}.txt").write_text(transcript, encoding="utf-8")
+    if proc.returncode:
+        # Prefix every line so CLI output cannot become a workflow command.
+        for line in transcript.splitlines():
+            print(f"[{label}] {line}", file=sys.stderr, flush=True)
+        raise RuntimeError(f"{label} failed; review its saved log")
+    print(f"Completed {label}", flush=True)
+
+
+def export_and_copy(
+    command: Callable[..., None], label: str, agent: str, destination: Path
+) -> None:
+    """Export inside Memanto's approved directory, then collect the bundle."""
+    from memanto.app.services.okf_export_service import OkfExportService
+
+    command(
+        label,
+        "memory",
+        "export",
+        "--okf",
+        "--agent",
+        agent,
+        "--limit",
+        "100",
+        "--split",
+        "file",
+    )
+    native_bundle = OkfExportService().exports_dir / f"{agent}_okf"
+    shutil.copytree(native_bundle, destination, symlinks=True)
 
 
 def source_recall(data: dict, query: str) -> list[str]:
@@ -116,20 +161,7 @@ def main() -> int:
     key = cfg.get_api_key()
 
     def command(label: str, *parts: str) -> None:
-        proc = subprocess.run(
-            [sys.executable, "-m", "memanto.cli.main", *parts],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        transcript = proc.stdout + proc.stderr
-        if key:
-            transcript = transcript.replace(key, "[REDACTED]")
-        (output / f"{label}.txt").write_text(transcript, encoding="utf-8")
-        if proc.returncode:
-            raise RuntimeError(f"{label} failed; review its saved log")
-        print(f"Completed {label}", flush=True)
+        run_cli(output, label, *parts, key=key)
 
     suffix = uuid.uuid4().hex[:12]
     first, second = f"voller-portable-{suffix}-a", f"voller-portable-{suffix}-b"
@@ -142,20 +174,11 @@ def main() -> int:
     command("03_import", "migrate", "okf", str(output / "source_okf"), "--agent", first)
     for probe in baseline:
         probe["first_memanto_top5"] = remote_recall(first, probe["query"])
-    command(
-        "04_export",
-        "memory",
-        "export",
-        "--okf",
-        "--agent",
-        first,
-        "--limit",
-        "100",
-        "--split",
-        "file",
-        "--output",
-        str(output / "first_export"),
+    (output / "first_recall.json").write_text(
+        json.dumps({"probes": baseline, "data_round_trip_complete": False}, indent=2),
+        encoding="utf-8",
     )
+    export_and_copy(command, "04_export", first, output / "first_export")
     if digest(restore_bundle(output / "first_export")) != digest(data):
         raise AssertionError(
             "First real-service export did not preserve all selected fields"
@@ -166,20 +189,7 @@ def main() -> int:
     )
     for probe in baseline:
         probe["second_memanto_top5"] = remote_recall(second, probe["query"])
-    command(
-        "07_export_again",
-        "memory",
-        "export",
-        "--okf",
-        "--agent",
-        second,
-        "--limit",
-        "100",
-        "--split",
-        "file",
-        "--output",
-        str(output / "second_export"),
-    )
+    export_and_copy(command, "07_export_again", second, output / "second_export")
     if digest(restore_bundle(output / "second_export")) != digest(data):
         raise AssertionError(
             "Second real-service export did not preserve all selected fields"
