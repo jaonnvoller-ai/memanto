@@ -8,6 +8,8 @@ on:
       - scripts/voller_record_demo.py
       - scripts/test_voller_record_demo.py
       - scripts/voller_recording_backup.py
+      - scripts/voller_recording_cleanup.py
+      - scripts/test_voller_recording_cleanup.py
   workflow_dispatch: {}
 
 permissions:
@@ -45,7 +47,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xvfb xterm x11-utils ffmpeg fonts-dejavu-core
       - name: Test recording safeguards
-        run: python -m pytest -o addopts='' -q _automation/scripts/test_voller_record_demo.py
+        run: >-
+          python -m pytest -o addopts='' -q
+          _automation/scripts/test_voller_record_demo.py
+          _automation/scripts/test_voller_recording_cleanup.py
       - name: Capture and validate local terminal recording
         run: python _automation/scripts/voller_record_demo.py record --mode local --output recording/local
       - name: Read cloud capacity without changing existing data
@@ -54,12 +59,8 @@ jobs:
         env:
           MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
         run: python _automation/scripts/voller_record_demo.py preflight --output recording/capacity.json
-      - name: Capture a fresh real cloud migration
-        if: steps.capacity.outcome == 'success'
-        env:
-          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
-        run: python _automation/scripts/voller_record_demo.py record --mode cloud --output recording/cloud
-      - name: Verify read-only backups of the proposed old demo pair
+      - name: Refresh and verify backups of the approved old demo pair
+        id: backup_prepare
         if: steps.capacity.outcome == 'failure'
         env:
           MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
@@ -67,6 +68,35 @@ jobs:
           python _automation/scripts/voller_recording_backup.py
           --entry examples/migrations/voller-attention-tiles
           --output recording/proposed-space-backup
+      - name: Check fresh backup for credentials before upload
+        if: steps.backup_prepare.outcome == 'success'
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: python _automation/scripts/voller_record_demo.py scan --output recording/proposed-space-backup
+      - name: Save fresh backup before approved deletion
+        id: fresh_backup
+        if: steps.backup_prepare.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: voller-recording-approved-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: recording/proposed-space-backup/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Recheck both backups and remove only the approved pair
+        id: cleanup
+        if: steps.fresh_backup.outcome == 'success'
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+          VOLLER_BACKUP_ARTIFACT_ID: ${{ steps.fresh_backup.outputs.artifact-id }}
+        run: >-
+          python _automation/scripts/voller_recording_cleanup.py
+          --backup recording/proposed-space-backup
+          --backup-artifact-id "$VOLLER_BACKUP_ARTIFACT_ID"
+      - name: Capture a fresh real cloud migration
+        if: steps.capacity.outcome == 'success' || steps.cleanup.outcome == 'success'
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: python _automation/scripts/voller_record_demo.py record --mode cloud --output recording/cloud
       - name: Check recordings and evidence before upload
         id: scan
         if: always()
@@ -89,9 +119,12 @@ jobs:
           from pathlib import Path
           result = Path('recording/cloud/recording.json')
           passed = result.exists() and json.loads(result.read_text()).get('cloud_demo_passed') is True
-          message = ('Real cloud recording passed. Publish the cloud MP4 to an eligible social account and add its URL to PR #1984.' if passed else 'Cloud recording is incomplete. The artifact may include a LOCAL FORMAT ONLY preview and a capacity report. No existing namespaces were deleted.')
+          cleanup = Path('recording/proposed-space-backup/cleanup_result.json')
+          deleted = json.loads(cleanup.read_text()).get('delete_requests_completed', []) if cleanup.exists() else []
+          message = ('Real cloud recording passed. Publish the cloud MP4 to an eligible social account and add its URL to PR #1984.' if passed else 'Cloud recording is incomplete. Review the capacity and cleanup results in the artifact.')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write(message + '\nBountyHub claim is already registered; no prize is confirmed.\n')
+              summary.write('Approved demo copies removed: ' + str(len(deleted)) + '\n')
           print(message)
           raise SystemExit(0 if passed else 1)
           PY

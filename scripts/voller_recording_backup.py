@@ -90,7 +90,7 @@ def snapshot(entry: Path, output: Path) -> None:
         "source_sha256": SOURCE_HASH,
         "read_only": True,
         "cloud_write_attempted": False,
-        "deletion_authorized": False,
+        "snapshot_grants_deletion_authority": False,
         "proposed_targets": [],
     }
     for namespace, data in snapshots.items():
