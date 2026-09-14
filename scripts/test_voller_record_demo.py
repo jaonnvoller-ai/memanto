@@ -1,11 +1,14 @@
 import importlib.util
 import io
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
-spec = importlib.util.spec_from_file_location("recorder", Path(__file__).with_name("voller_record_demo.py"))
+spec = importlib.util.spec_from_file_location(
+    "recorder", Path(__file__).with_name("voller_record_demo.py")
+)
+assert spec is not None and spec.loader is not None
 recorder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(recorder)
 
@@ -24,12 +27,21 @@ def test_screen_redacts_split_credential_and_terminal_controls():
 def test_preflight_full_account_makes_no_mutations(monkeypatch, tmp_path):
     class Client:
         def __init__(self, **kwargs):
-            self.namespaces = SimpleNamespace(list=lambda: {"namespaces": [{"namespace_name": f"other-{i}"} for i in range(5)]})
+            self.namespaces = SimpleNamespace(
+                list=lambda: {
+                    "namespaces": [{"namespace_name": f"other-{i}"} for i in range(5)]
+                }
+            )
+
         def __enter__(self):
             return self
+
         def __exit__(self, *args):
             pass
-    monkeypatch.setitem(sys.modules, "moorcheh_sdk", SimpleNamespace(MoorchehClient=Client))
+
+    monkeypatch.setitem(
+        sys.modules, "moorcheh_sdk", SimpleNamespace(MoorchehClient=Client)
+    )
     monkeypatch.setenv("MOORCHEH_API_KEY", "test-secret")
     path = tmp_path / "capacity.json"
     assert recorder.preflight(path) == 3
@@ -41,6 +53,7 @@ def test_preflight_full_account_makes_no_mutations(monkeypatch, tmp_path):
 
 def test_scan_rejects_secret_and_symlink(monkeypatch, tmp_path):
     import pytest
+
     monkeypatch.setenv("MOORCHEH_API_KEY", "test-secret")
     path = tmp_path / "log.txt"
     path.write_text("test-secret")

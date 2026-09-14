@@ -7,6 +7,7 @@ on:
       - .github/workflows/voller-record-demo.yml
       - scripts/voller_record_demo.py
       - scripts/test_voller_record_demo.py
+      - scripts/voller_recording_backup.py
   workflow_dispatch: {}
 
 permissions:
@@ -58,6 +59,14 @@ jobs:
         env:
           MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
         run: python _automation/scripts/voller_record_demo.py record --mode cloud --output recording/cloud
+      - name: Verify read-only backups of the proposed old demo pair
+        if: steps.capacity.outcome == 'failure'
+        env:
+          MOORCHEH_API_KEY: ${{ secrets.MOORCHEH_API_KEY }}
+        run: >-
+          python _automation/scripts/voller_recording_backup.py
+          --entry examples/migrations/voller-attention-tiles
+          --output recording/proposed-space-backup
       - name: Check recordings and evidence before upload
         id: scan
         if: always()

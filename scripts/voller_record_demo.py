@@ -8,7 +8,6 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import shutil
@@ -16,6 +15,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 class ScreenText(io.TextIOBase):
@@ -70,7 +70,9 @@ def preflight(output: Path) -> int:
         "two_free_slots": ready,
         "cloud_write_attempted": False,
         "existing_demo_namespaces": [
-            n for n in names if re.fullmatch(r"memanto_agent_voller-portable-[a-f0-9]{12}-[ab]", n)
+            n
+            for n in names
+            if re.fullmatch(r"memanto_agent_voller-portable-[a-f0-9]{12}-[ab]", n)
         ],
         "note": "No namespaces deleted. Existing copies require separate cleanup approval.",
     }
@@ -78,7 +80,9 @@ def preflight(output: Path) -> int:
     output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2), flush=True)
     if not ready:
-        print("BLOCKED: this recording needs two free namespace slots. No upload attempted.")
+        print(
+            "BLOCKED: this recording needs two free namespace slots. No upload attempted."
+        )
     return 0 if ready else 3
 
 
@@ -99,25 +103,45 @@ def session(entry: Path, output: Path, mode: str) -> int:
     source = entry / "source_public.json"
     data = json.loads(source.read_text())
     print("VOLLER ATTENTION TILES | MEMANTO + OKF")
-    print("Automated real terminal capture | " + time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()))
-    print("Mode: " + ("LIVE CLOUD MIGRATION" if mode == "cloud" else "LOCAL FORMAT ONLY - no cloud migration"))
+    print(
+        "Automated real terminal capture | "
+        + time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+    )
+    print(
+        "Mode: "
+        + (
+            "LIVE CLOUD MIGRATION"
+            if mode == "cloud"
+            else "LOCAL FORMAT ONLY - no cloud migration"
+        )
+    )
     print(f"Saved public catalogue: {len(data['tiles'])} tiles")
-    print("Finding relevant context: month, weather and tide can change a fishing answer.")
+    print(
+        "Finding relevant context: month, weather and tide can change a fishing answer."
+    )
     print("These are concept records, not proof of physical or healing performance.")
     for tile in data["tiles"]:
         if tile["id"] in ("attention-display", "ai-fisherman"):
-            print(json.dumps({k: tile[k] for k in ("id", "title", "summary")}, ensure_ascii=False))
+            print(
+                json.dumps(
+                    {k: tile[k] for k in ("id", "title", "summary")}, ensure_ascii=False
+                )
+            )
     time.sleep(5)
     evidence = output / "evidence"
     if mode == "local":
         import run_demo
+
         print("\n$ python run_demo.py source_public.json evidence")
         run_demo.execute(source, evidence, True)
         show_sample(evidence / "exported_okf")
         code = 0
-        print("LOCAL FORMAT RECORDING COMPLETE. This is not the required cloud demonstration.")
+        print(
+            "LOCAL FORMAT RECORDING COMPLETE. This is not the required cloud demonstration."
+        )
     else:
         import run_live
+
         original = run_live.run_cli
 
         def visible_cli(folder, label, *parts, key=None):
@@ -133,7 +157,19 @@ def session(entry: Path, output: Path, mode: str) -> int:
         if (evidence / "live_validation.json").exists():
             result = json.loads((evidence / "live_validation.json").read_text())
             print("\nRESULTS FROM THIS RECORDING:")
-            print(json.dumps({k: result[k] for k in ("selected_tiles", "data_round_trip_passed", "retrieval_hits_out_of_8")}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        k: result[k]
+                        for k in (
+                            "selected_tiles",
+                            "data_round_trip_passed",
+                            "retrieval_hits_out_of_8",
+                        )
+                    },
+                    indent=2,
+                )
+            )
         print("PASS" if code == 0 else "FAILED: review this run's evidence")
         print("Eight named-record lookups; no general answer-quality or savings claim.")
         print("Custom-catalogue eligibility and prize approval remain unconfirmed.")
@@ -153,21 +189,90 @@ def record(entry: Path, output: Path, mode: str) -> int:
     started = time.time()
     try:
         with (output / "xvfb.log").open("w") as log:
-            xvfb = subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x720x24", "-nolisten", "tcp"], env=recorder_env, stdout=log, stderr=log)
+            xvfb = subprocess.Popen(
+                ["Xvfb", ":99", "-screen", "0", "1280x720x24", "-nolisten", "tcp"],
+                env=recorder_env,
+                stdout=log,
+                stderr=log,
+            )
         processes.append(xvfb)
         for _ in range(50):
             if xvfb.poll() is not None:
                 raise RuntimeError("Virtual display failed to start")
-            if subprocess.run(["xdpyinfo"], env=recorder_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            if (
+                subprocess.run(
+                    ["xdpyinfo"],
+                    env=recorder_env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                ).returncode
+                == 0
+            ):
                 break
             time.sleep(0.1)
         else:
             raise TimeoutError("Virtual display did not become ready")
-        command = ["xterm", "-geometry", "110x34+0+0", "-fa", "DejaVu Sans Mono", "-fs", "13", "-bg", "#111827", "-fg", "#f3f4f6", "-sb", "-rightbar", "-title", "Voller real Memanto demonstration", "-e", sys.executable, str(Path(__file__).resolve()), "session", "--mode", mode, "--entry", str(entry), "--output", str(output)]
-        terminal = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        command = [
+            "xterm",
+            "-geometry",
+            "110x34+0+0",
+            "-fa",
+            "DejaVu Sans Mono",
+            "-fs",
+            "13",
+            "-bg",
+            "#111827",
+            "-fg",
+            "#f3f4f6",
+            "-sb",
+            "-rightbar",
+            "-title",
+            "Voller real Memanto demonstration",
+            "-e",
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "session",
+            "--mode",
+            mode,
+            "--entry",
+            str(entry),
+            "--output",
+            str(output),
+        ]
+        terminal = subprocess.Popen(
+            command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         processes.append(terminal)
         with (output / "ffmpeg.log").open("w") as log:
-            capture = subprocess.Popen(["ffmpeg", "-nostdin", "-y", "-f", "x11grab", "-framerate", "15", "-video_size", "1280x720", "-i", ":99", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(video)], env=recorder_env, stdout=log, stderr=log)
+            capture = subprocess.Popen(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "x11grab",
+                    "-framerate",
+                    "15",
+                    "-video_size",
+                    "1280x720",
+                    "-i",
+                    ":99",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "23",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                    str(video),
+                ],
+                env=recorder_env,
+                stdout=log,
+                stderr=log,
+            )
         processes.append(capture)
         time.sleep(2)
         if capture.poll() is not None or terminal.poll() is not None:
@@ -179,14 +284,40 @@ def record(entry: Path, output: Path, mode: str) -> int:
         if capture.returncode not in (0, 255):
             raise RuntimeError("Screen recorder failed")
         result = json.loads((output / "session-result.json").read_text())
-        probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_name,width,height", "-of", "json", str(video)], capture_output=True, text=True, check=True)
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration:stream=codec_name,width,height",
+                "-of",
+                "json",
+                str(video),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         media = json.loads(probe.stdout)
         if float(media["format"]["duration"]) < 5 or not media["streams"]:
             raise ValueError("Recording has no usable video")
-        result.update({"capture": "actual xterm pixels recorded by FFmpeg x11grab during execution", "mode": mode, "started_unix": started, "media": media, "video_sha256": hashlib.sha256(video.read_bytes()).hexdigest(), "cloud_demo_passed": mode == "cloud" and result["exit_code"] == 0})
+        result.update(
+            {
+                "capture": "actual xterm pixels recorded by FFmpeg x11grab during execution",
+                "mode": mode,
+                "started_unix": started,
+                "media": media,
+                "video_sha256": hashlib.sha256(video.read_bytes()).hexdigest(),
+                "cloud_demo_passed": mode == "cloud" and result["exit_code"] == 0,
+            }
+        )
         (output / "recording.json").write_text(json.dumps(result, indent=2) + "\n")
         print(json.dumps(result, indent=2))
-        return result["exit_code"]
+        exit_code = result["exit_code"]
+        if not isinstance(exit_code, int):
+            raise ValueError("Invalid session exit code")
+        return exit_code
     finally:
         for process in reversed(processes):
             if process.poll() is None:
@@ -210,7 +341,9 @@ def scan(output: Path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("preflight", "session", "record", "scan"))
-    parser.add_argument("--entry", type=Path, default=Path("examples/migrations/voller-attention-tiles"))
+    parser.add_argument(
+        "--entry", type=Path, default=Path("examples/migrations/voller-attention-tiles")
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--mode", choices=("local", "cloud"), default="local")
     args = parser.parse_args()
@@ -232,7 +365,9 @@ def main():
             print(f"STOPPED: {type(exc).__name__}: {exc}")
         finally:
             if args.action == "session":
-                (output / "session-result.json").write_text(json.dumps({"exit_code": code}))
+                (output / "session-result.json").write_text(
+                    json.dumps({"exit_code": code})
+                )
                 time.sleep(2)
             screen.finish()
     return code
