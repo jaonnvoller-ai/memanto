@@ -23,12 +23,19 @@ from memanto.cli.migrate.mappers import map_okf
 from memanto.cli.migrate.okf_loader import load_okf_bundle
 
 
-def test_live_export_uses_native_directory_before_collecting(tmp_path, monkeypatch):
+@pytest.mark.parametrize("tile_count", [0, 2, 100, 101, 150])
+def test_live_export_uses_native_directory_before_collecting(
+    tmp_path, monkeypatch, tile_count
+):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(Path, "home", lambda: home)
     source = tmp_path / "source"
     data = catalog()
+    data["tiles"] = [
+        dict(data["tiles"][0], id=f"tile-{i}", title=f"Concept {i}")
+        for i in range(tile_count)
+    ]
     build_bundle(data, source)
     grouped = {}
     for i, row in enumerate(map_okf(load_okf_bundle(source))):
@@ -52,14 +59,18 @@ def test_live_export_uses_native_directory_before_collecting(tmp_path, monkeypat
             "--agent",
             "test-agent",
             "--limit",
-            "100",
+            str(tile_count + 1),
             "--split",
             "file",
         )
         # Exercise actual serialization at the CLI's default destination.
-        service.write_okf_bundle("test-agent", grouped, split="file")
+        # Model the CLI's per-type selection, then exercise the actual native
+        # serializer and full-snapshot restoration (including >100 artifacts).
+        limit = int(parts[parts.index("--limit") + 1])
+        selected = {kind: records[:limit] for kind, records in grouped.items()}
+        service.write_okf_bundle("test-agent", selected, split="file")
 
-    export_and_copy(command, "04_export", "test-agent", destination)
+    export_and_copy(command, "04_export", "test-agent", destination, data)
     assert len(calls) == 1
     assert restore_bundle(destination) == data
     assert restore_bundle(service.exports_dir / "test-agent_okf") == data
@@ -99,7 +110,7 @@ def test_recall_diagnostics_preserve_misses_and_require_complete_export(
         calls.append("recall")
         return [] if len(calls) == 1 else [target]
 
-    def export(command, label, agent, destination):
+    def export(command, label, agent, destination, source_data):
         calls.append("export")
         exported = dict(data)
         if not complete_export:
@@ -160,7 +171,7 @@ def test_ready_queries_wait_for_two_consecutive_complete_snapshots(
     calls = []
     monkeypatch.setattr(run_live.time, "sleep", lambda seconds: None)
 
-    def export(command, label, agent, destination):
+    def export(command, label, agent, destination, source_data):
         calls.append("export")
         snapshot = dict(data)
         if not next(complete):
@@ -192,7 +203,7 @@ def test_incomplete_visibility_is_bounded_and_evidence_survives(tmp_path, monkey
     calls = []
     monkeypatch.setattr(run_live.time, "sleep", lambda seconds: None)
 
-    def export(command, label, agent, destination):
+    def export(command, label, agent, destination, source_data):
         calls.append(label)
         build_bundle(dict(data, tiles=data["tiles"][1:]), destination)
 
@@ -220,7 +231,7 @@ def test_readiness_deadline_cannot_be_overridden_by_complete_data(
     clock = [0.0]
     monkeypatch.setattr(run_live.time, "monotonic", lambda: clock[0])
 
-    def export(command, label, agent, destination):
+    def export(command, label, agent, destination, source_data):
         build_bundle(data, destination)
         clock[0] += 10
 

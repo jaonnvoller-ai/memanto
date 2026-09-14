@@ -61,7 +61,11 @@ def run_cli(output: Path, label: str, *parts: str, key: str | None = None) -> No
 
 
 def export_and_copy(
-    command: Callable[..., None], label: str, agent: str, destination: Path
+    command: Callable[..., None],
+    label: str,
+    agent: str,
+    destination: Path,
+    data: dict,
 ) -> None:
     """Export inside Memanto's approved directory, then collect the bundle."""
     from memanto.app.services.okf_export_service import OkfExportService
@@ -74,7 +78,10 @@ def export_and_copy(
         "--agent",
         agent,
         "--limit",
-        "100",
+        # The CLI limit is per memory type. The entire expected record count
+        # (all tiles plus catalogue metadata) covers every type in this fresh
+        # demo agent, including catalogues larger than the old fixed limit.
+        str(len(data["tiles"]) + 1),
         "--split",
         "file",
     )
@@ -172,7 +179,7 @@ def collect_agent_evidence(
         json.dumps({"probes": probes, "data_round_trip_complete": False}, indent=2),
         encoding="utf-8",
     )
-    export_and_copy(command, label, agent, destination)
+    export_and_copy(command, label, agent, destination, data)
     if digest(restore_bundle(destination)) != digest(data):
         raise AssertionError(
             f"{stage} real-service export did not preserve all selected fields"
@@ -248,7 +255,7 @@ def wait_for_complete_export(
             break
         snapshot = snapshots / f"attempt-{attempt:02d}"
         # CLI/authentication failures propagate immediately; they are not readiness misses.
-        export_and_copy(command, f"{label}_ready_{attempt:02d}", agent, snapshot)
+        export_and_copy(command, f"{label}_ready_{attempt:02d}", agent, snapshot, data)
         observation: dict[str, Any] = {"attempt": attempt, "complete": False}
         try:
             actual = digest(restore_bundle(snapshot))
