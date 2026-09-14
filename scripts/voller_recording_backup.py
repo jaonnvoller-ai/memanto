@@ -43,9 +43,10 @@ def read_all(client: Any, namespace: str) -> list[dict[str, Any]]:
 def snapshot(entry: Path, output: Path) -> None:
     sys.path.insert(0, str(entry.resolve()))
     from adapter import digest, restore_contents
+    from moorcheh_sdk import MoorchehClient
+
     from memanto.app.services.memory_read_service import MemoryReadService
     from memanto.app.services.okf_export_service import OkfExportService
-    from moorcheh_sdk import MoorchehClient
 
     key = os.environ.get("MOORCHEH_API_KEY")
     if not key:
